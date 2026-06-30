@@ -1,0 +1,217 @@
+-- [[ DEATHBYTE v1.0 + STAFF DETECTOR - DELTA MOBILE ]] --
+
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+
+local function SendDeathByteNotify(msg)
+    game:GetService("StarterGui"):SetCore("SendNotification", {
+        Title = "DEATHBYTE",
+        Text = msg,
+        Duration = 3
+    })
+end
+
+-- ==================== 1. BYPASS ====================
+local oldKick = hookfunction(LocalPlayer.Kick, newcclosure(function(self, ...)
+    print("[DEATHBYTE] Kick Blocked")
+    return nil
+end))
+
+local BlockList = {"Analytics", "Telemetry", "CombatLog", "Report", "Cheat"}
+
+local oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+    local method = getnamecallmethod()
+    if not checkcaller() and method == "FireServer" then
+        local name = tostring(self)
+        for _, blocked in ipairs(BlockList) do
+            if name:find(blocked) then 
+                print("[DEATHBYTE] Blocked:", name)
+                return nil 
+            end
+        end
+    end
+    return oldNamecall(self, ...)
+end))
+
+shared.DeathByteBypassSuccess = true   -- 성공 표시
+SendDeathByteNotify("Bypass Loaded Successfully")
+
+-- ==================== 2. STAFF DETECTOR ====================
+xpcall(function()
+    if game.GameId ~= 6035872082 then return end
+    if shared.StaffDetectorLoading then return end
+    shared.StaffDetectorLoading = true
+
+    repeat task.wait() until game:IsLoaded()
+
+    local cloneref = cloneref or function(obj) return obj end
+    local players = cloneref(game:GetService("Players"))
+    local coregui = gethui() or cloneref(game:GetService("CoreGui"))
+    local http = game:GetService("HttpService")
+    local groupId = game.CreatorId
+
+    local bypassStatus = shared.DeathByteBypassSuccess and "✅ 성공" or "❌ 실패"
+
+    local CACHE_FILE = "AntiLua/staffcache_" .. groupId .. ".json"
+
+    -- (아래부터는 이전에 최적화한 2번 코드와 동일)
+    local function fetchURL(url)
+        local ok, res = pcall(game.HttpGet, game, url)
+        if ok then return http:JSONDecode(res) end
+        return nil
+    end
+
+    local function loadCachedStaffIds()
+        local cached = {}
+        pcall(function()
+            if isfile(CACHE_FILE) then
+                local data = http:JSONDecode(readfile(CACHE_FILE))
+                if type(data) == "table" then
+                    for _, uid in ipairs(data) do cached[uid] = true end
+                end
+            end
+        end)
+        return cached
+    end
+
+    local function saveCachedStaffIds(ids)
+        pcall(function()
+            local list = {}
+            for uid in pairs(ids) do table.insert(list, uid) end
+            writefile(CACHE_FILE, http:JSONEncode(list))
+        end)
+    end
+
+    local function extractStaffRoleIds(groupId)
+        local url = ("https://groups.roblox.com/v1/groups/%d/roles"):format(groupId)
+        local data = fetchURL(url)
+        local roleIds = {}
+        if data and data.roles then
+            for _, r in ipairs(data.roles) do
+                local name = string.lower(r.name)
+                if name:find("mod") or name:find("staff") or name:find("contributor")
+                or name:find("script") or name:find("build") then
+                    table.insert(roleIds, r.id)
+                end
+            end
+        end
+        return roleIds
+    end
+
+    local function GetRole(plr, groupId)
+        if plr and typeof(plr) == "Instance" then
+            local method = plr.GetRoleInGroup
+            if typeof(method) == "function" then return method(plr, groupId) end
+        end
+        return nil
+    end
+
+    local function isStaffRoleName(role)
+        if role and typeof(role) == "string" then
+            local r = string.lower(role)
+            return r:find("mod") or r:find("staff") or r:find("contributor") 
+                or r:find("script") or r:find("build")
+        end
+        return false
+    end
+
+    local function shortenName(name)
+        return #name > 6 and string.sub(name, 1, 6) .. "..." or name
+    end
+
+    local function getStaffInfo()
+        local staffNames = {}
+        for _, plr in ipairs(players:GetPlayers()) do
+            if isStaffRoleName(GetRole(plr, game.CreatorId)) then
+                table.insert(staffNames, shortenName(plr.Name))
+            end
+        end
+        return staffNames
+    end
+
+    local function showNotification(staffNames)
+        local old = coregui:FindFirstChild("ModAlertNotification")
+        if old then old:Destroy() end
+
+        local screengui = Instance.new("ScreenGui")
+        screengui.Name = "ModAlertNotification"
+        screengui.ResetOnSpawn = false
+        screengui.DisplayOrder = 2147483647
+        screengui.IgnoreGuiInset = true
+        screengui.Parent = coregui
+
+        local canvas = Instance.new("CanvasGroup")
+        canvas.Size = UDim2.new(0, 280, 0, 0)
+        canvas.AutomaticSize = Enum.AutomaticSize.Y
+        canvas.Position = UDim2.new(1, -20, 1, -20)
+        canvas.AnchorPoint = Vector2.new(1, 1)
+        canvas.BackgroundColor3 = Color3.fromRGB(25, 25, 28)
+        canvas.BackgroundTransparency = 0.1
+        canvas.Parent = screengui
+
+        Instance.new("UICorner", canvas).CornerRadius = UDim.new(0, 10)
+        Instance.new("UIStroke", canvas).Color = Color3.fromRGB(80, 80, 85)
+
+        local statusLabel = Instance.new("TextLabel")
+        statusLabel.Size = UDim2.new(1, 0, 0, 30)
+        statusLabel.BackgroundTransparency = 1
+        statusLabel.Text = bypassStatus .. " | Moderator Detector"
+        statusLabel.TextColor3 = shared.DeathByteBypassSuccess and Color3.fromRGB(0, 255, 120) or Color3.fromRGB(255, 80, 80)
+        statusLabel.TextSize = 15
+        statusLabel.Font = Enum.Font.GothamBold
+        statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+        statusLabel.Parent = canvas
+
+        local padding = Instance.new("UIPadding", canvas)
+        padding.PaddingLeft = UDim.new(0, 14)
+        padding.PaddingRight = UDim.new(0, 14)
+        padding.PaddingTop = UDim.new(0, 6)
+        padding.PaddingBottom = UDim.new(0, 12)
+
+        local desc = Instance.new("TextLabel")
+        desc.RichText = true
+        desc.Text = #staffNames > 0 and "<font color='#FF6666'>Moderators detected!</font>" or "No staff detected."
+        desc.TextColor3 = Color3.fromRGB(220, 220, 220)
+        desc.TextSize = 14
+        desc.Font = Enum.Font.Gotham
+        desc.TextWrapped = true
+        desc.BackgroundTransparency = 1
+        desc.Parent = canvas
+
+        if #staffNames > 0 then
+            local staffList = Instance.new("TextLabel")
+            staffList.Text = "Server: " .. table.concat(staffNames, ", ")
+            staffList.TextColor3 = Color3.fromRGB(255, 180, 180)
+            staffList.TextSize = 13
+            staffList.Font = Enum.Font.Gotham
+            staffList.TextWrapped = true
+            staffList.BackgroundTransparency = 1
+            staffList.Parent = canvas
+        end
+
+        task.delay(18, function() pcall(function() screengui:Destroy() end) end)
+    end
+
+    -- 실행
+    local staffNames = getStaffInfo()
+    showNotification(staffNames)
+
+    players.PlayerAdded:Connect(function(plr)
+        task.wait(1.5)
+        if isStaffRoleName(GetRole(plr, game.CreatorId)) then
+            showNotification({shortenName(plr.Name)})
+        end
+    end)
+
+    task.spawn(function()
+        local staffRoleIds = extractStaffRoleIds(groupId)
+        local staffUserIds = loadCachedStaffIds()
+        saveCachedStaffIds(staffUserIds)
+    end)
+
+end, function(err)
+    warn("[Staff Detector] Error:", err)
+    shared.DeathByteBypassSuccess = false
+end)
+
+SendDeathByteNotify("DeathByte + Staff Detector Full Loaded")
